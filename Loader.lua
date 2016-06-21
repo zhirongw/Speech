@@ -195,11 +195,11 @@ function Loader:nxt_batch(inds, flag)
     end
 
     -- store tensors into a fixed len tensor_array TODO should find a better way to do this
+--    local tensor_array = torch.rand(#inds, 1, h, max_w):mul(255)
     local tensor_array = torch.Tensor(#inds, 1, h, max_w):zero()
     for ind, tensor in ipairs(tensor_list) do
         tensor_array[ind][1]:narrow(2, 1, tensor:size(2)):copy(tensor)
     end
-
     txn_spect:abort(); self.db_spect:close()
     txn_label:abort(); self.db_label:close()
     if flag then txn_trans:abort(); self.db_trans:close() end

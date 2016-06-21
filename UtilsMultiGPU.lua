@@ -16,7 +16,7 @@ function makeDataParallel(model, nGPU, is_cudnn)
         end
         if nGPU > 1 then
             gpus = torch.range(1, nGPU):totable()
-            dpt = nn.DataParallelTable(1):add(model, gpus):threads(function()
+            dpt = nn.DataParallelTable(1, true, true):add(model, gpus):threads(function()
                 require 'nngraph'
                 require 'MaskRNN'
                 require 'ReverseMaskRNN'
