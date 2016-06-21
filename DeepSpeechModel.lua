@@ -19,7 +19,7 @@ local function getRNNModule(nIn, nHidden, GRU, is_cudnn)
     end
     if is_cudnn then
         require 'cudnn'
-        return cudnn.BLSTM(nIn, nHidden, 1)
+        return cudnn.LSTM(nIn, nHidden, 1)
     else
         require 'rnn'
     end
@@ -31,42 +31,45 @@ local function BRNN(feat, seqLengths, rnnModule)
     local fwdLstm = nn.MaskRNN(rnnModule:clone())({ feat, seqLengths })
     local bwdLstm = nn.ReverseMaskRNN(rnnModule:clone())({ feat, seqLengths })
     return nn.CAddTable()({ fwdLstm, bwdLstm })
+--    return nn.JoinTable(2)({ fwdLstm, bwdLstm })
 end
 -- Creates the covnet+rnn structure.
 local function deepSpeech(nGPU, isCUDNN)
     local GRU = false
     local seqLengths = nn.Identity()()
     local input = nn.Identity()()
-    local model = nn.Sequential()
+    local cnn = nn.Sequential()
 
     -- (nInputPlane, nOutputPlane, kW, kH, [dW], [dH], [padW], [padH]) conv layers.
-    model:add(nn.SpatialConvolution(1, 32, 41, 11, 2, 2))
-    model:add(nn.SpatialBatchNormalization(32))
-    model:add(nn.ReLU(true))
-    model:add(nn.SpatialConvolution(32, 32, 21, 11, 2, 1))
-    model:add(nn.SpatialBatchNormalization(32))
-    model:add(nn.ReLU(true))
-    model:add(nn.SpatialMaxPooling(2, 2, 2, 2)) -- TODO the DS2 architecture does not include this layer, but mem overhead increases.
+    cnn:add(nn.SpatialConvolution(1, 32, 41, 11, 2, 2))
+    cnn:add(nn.SpatialBatchNormalization(32))
+    cnn:add(nn.ReLU(true))
+    cnn:add(nn.SpatialConvolution(32, 32, 21, 11, 2, 1))
+    cnn:add(nn.SpatialBatchNormalization(32))
+    cnn:add(nn.ReLU(true))
+    cnn:add(nn.SpatialMaxPooling(2, 2, 2, 2)) -- TODO the DS2 architecture does not include this layer, but mem overhead increases.
 
     local rnnInputSize = 32 * 25 -- based on the above convolutions.
     local rnnHiddenSize = 400 -- size of rnn hidden layers
     local nbOfHiddenLayers = 4
 
-    model:add(nn.View(rnnInputSize, -1):setNumInputDims(3)) -- batch x features x seqLength
-    model:add(nn.Transpose({ 2, 3 }, { 1, 2 })) -- seqLength x batch x features
+    cnn:add(nn.View(rnnInputSize, -1):setNumInputDims(3)) -- batch x features x seqLength
+    cnn:add(nn.Transpose({ 2, 3 }, { 1, 2 })) -- seqLength x batch x features
+    cnn:add(nn.View(-1, rnnInputSize)) -- (seqLength x batch) x features
 
-    model:add(getRNNModule(rnnInputSize, rnnHiddenSize, GRU, isCUDNN))
-    model:add(nn.SplitAdd())
+    local rnn = nn.Identity()({cnn(input)})
+    local rnn_module = getRNNModule(rnnInputSize, rnnHiddenSize, GRU, isCUDNN)
+    rnn = BRNN(rnn, seqLengths, rnn_module)
+    local rnn_module = getRNNModule(rnnHiddenSize, rnnHiddenSize, GRU, isCUDNN)
 
     for i = 1, nbOfHiddenLayers do
-        model:add(nn.SeqDecorator(nn.BatchNormalization(rnnHiddenSize)))
-        model:add(getRNNModule(rnnHiddenSize, rnnHiddenSize, GRU, isCUDNN))
-        model:add(nn.SplitAdd())
+        rnn = nn.BatchNormalization(rnnHiddenSize)(rnn)
+        rnn = BRNN(rnn, seqLengths, rnn_module)
     end
 
-    model:add(nn.View(-1, rnnHiddenSize)) -- (seqLength x batch) x features
-    model:add(nn.BatchNormalization(rnnHiddenSize))
-    model:add(nn.Linear(rnnHiddenSize, 28))
+    rnn = nn.BatchNormalization(rnnHiddenSize)(rnn)
+    rnn = nn.Linear(rnnHiddenSize, 28)(rnn)
+    local model = nn.gModule({input, seqLengths}, {rnn})
     model = makeDataParallel(model, nGPU, isCUDNN)
     return model
 end

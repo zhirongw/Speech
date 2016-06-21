@@ -130,7 +130,7 @@ function Network:trainNetwork(epochs, sgd_params)
         --print('data time:' .. timer:time().real - start)
         --cutorch.synchronize()
         start = timer:time().real
-        local predictions = self.model:forward(inputs)
+        local predictions = self.model:forward({inputs, sizes})
         --cutorch.synchronize()
         --print('forward time:' .. timer:time().real - start)
         --cutorch.synchronize()
