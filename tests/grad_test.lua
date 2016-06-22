@@ -9,8 +9,7 @@ require 'nngraph'
 require 'torch'
 require 'cudnn'
 require 'nnx'
-require '../MaskRNN'
-require '../ReverseMaskRNN'
+require '../BLSTM'
 
 local gradcheck = require 'gradcheck'
 
@@ -57,25 +56,20 @@ local function gradCheckSpeech()
   torch.manualSeed(123)
   local dtype = 'torch.DoubleTensor'
   -- first build a mini model
-  local seq_length = nn.Identity()()
-  local input = nn.Identity()()
-
-  local cnn = nn.Sequential()
-  cnn:add(nn.SpatialConvolution(1,8,3,3,2,2))
-  --cnn:add(nn.SpatialBatchNormalization(8))
-  cnn:add(nn.ReLU(true))
+  local model = nn.Sequential()
+  model:add(nn.SpatialConvolution(1,8,3,3,2,2))
+  --model:add(nn.SpatialBatchNormalization(8))
+  model:add(nn.ReLU(true))
   local rnnInputsize = 8 * 3
   local rnnHiddensize = 7
-  cnn:add(nn.View(rnnInputsize, -1):setNumInputDims(3))
-  cnn:add(nn.Transpose({2,3},{1,2}))
-  cnn:add(nn.View(-1, rnnInputsize))
+  model:add(nn.View(rnnInputsize, -1):setNumInputDims(3))
+  model:add(nn.Transpose({2,3},{1,2}))
   
-  local rnn = nn.Identity()({ cnn(input) })
-  rnn_module = getRNNModule(rnnInputsize, rnnHiddensize, GRU, isCUDNN) 
-  rnn = BRNN(rnn, seq_length, rnn_module)
-  --rnn = nn.BatchNormalization(rnnHiddensize)(rnn)
-  rnn = nn.Linear(2*rnnHiddensize, 4)(rnn)
-  local model = nn.gModule({input, seq_length}, {rnn})
+  model:add(nn.BLSTM(rnnInputsize, rnnHiddensize, false))
+  model:add(nn.View(-1, 2*rnnHiddensize))
+  --model = nn.BatchNormalization(rnnHiddensize)(rnn)
+  model:add(nn.Linear(2*rnnHiddensize, 4))
+  --model:type(dtype)
 
   local specs = torch.rand(2, 1, 7, 11)
   --specs[{1,1,{},{4,11}}]:fill(0)
@@ -83,22 +77,21 @@ local function gradCheckSpeech()
 --  local labels = {{1}, {1,3,3}
 
   -- evaluate the analytic gradient
-  local output = model:forward({specs, sizes})
+  local output = model:forward(specs)
   local w = torch.randn(output:size()):fill(1)
   w = w:view(5, 2, 4)
-  w[{{2,5}, 1, {}}]:fill(0)
+  --w[{{2,5}, 1, {}}]:fill(0)
   w = w:view(10, 4)
   local ww = w:clone()
   -- generate random weighted sum criterion
   local loss = torch.sum(torch.cmul(output, w))
   print('loss is: ' .. loss)
 
-  local gradInput = model:backward({specs, sizes}, w)
-  gradInput = gradInput[1]
+  local gradInput = model:backward(specs, w)
 
   -- create a loss function wrapper
   local function f(x)
-    local output = model:forward({x, sizes})
+    local output = model:forward(x)
     local loss = torch.sum(torch.cmul(output, ww))
     return loss
   end

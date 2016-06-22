@@ -81,6 +81,7 @@ function Network:trainNetwork(epochs, sgd_params)
     local validationHistory = {}
     local ctcCriterion = nn.CTCCriterion()
     local x, gradParameters = self.model:getParameters()
+    print('Number of model params: ' .. x:nElement())
 
     -- inputs (preallocate)
     local inputs = torch.Tensor()
@@ -130,7 +131,7 @@ function Network:trainNetwork(epochs, sgd_params)
         --print('data time:' .. timer:time().real - start)
         --cutorch.synchronize()
         start = timer:time().real
-        local predictions = self.model:forward({inputs, sizes})
+        local predictions = self.model:forward(inputs)
         --cutorch.synchronize()
         --print('forward time:' .. timer:time().real - start)
         --cutorch.synchronize()

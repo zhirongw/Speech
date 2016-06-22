@@ -75,7 +75,7 @@ function WEREvaluator:getWER(gpu, model, calSizeOfSequences, verbose, epoch)
         sizes_array = calSizeOfSequences(sizes_array)
         inputs:resize(inputsCPU:size()):copy(inputsCPU)
         cutorch.synchronize()
-        local predictions = model:forward({inputs, sizes_array})
+        local predictions = model:forward(inputs)
         predictions = predictions:view(-1, self.testBatchSize, predictions:size(2)):transpose(1, 2)
         cutorch.synchronize()
 
