@@ -30,8 +30,8 @@ end
 local function BRNN(feat, seqLengths, rnnModule)
     local fwdLstm = nn.MaskRNN(rnnModule:clone())({ feat, seqLengths })
     local bwdLstm = nn.ReverseMaskRNN(rnnModule:clone())({ feat, seqLengths })
-    return nn.CAddTable()({ fwdLstm, bwdLstm })
---    return nn.JoinTable(2)({ fwdLstm, bwdLstm })
+--    return nn.CAddTable()({ fwdLstm, bwdLstm })
+    return nn.JoinTable(2)({ fwdLstm, bwdLstm })
 end
 -- Creates the covnet+rnn structure.
 local function deepSpeech(nGPU, isCUDNN)
@@ -60,15 +60,15 @@ local function deepSpeech(nGPU, isCUDNN)
     local rnn = nn.Identity()({cnn(input)})
     local rnn_module = getRNNModule(rnnInputSize, rnnHiddenSize, GRU, isCUDNN)
     rnn = BRNN(rnn, seqLengths, rnn_module)
-    local rnn_module = getRNNModule(rnnHiddenSize, rnnHiddenSize, GRU, isCUDNN)
+    local rnn_module = getRNNModule(2*rnnHiddenSize, rnnHiddenSize, GRU, isCUDNN)
 
     for i = 1, nbOfHiddenLayers do
-        rnn = nn.BatchNormalization(rnnHiddenSize)(rnn)
+        rnn = nn.BatchNormalization(2*rnnHiddenSize)(rnn)
         rnn = BRNN(rnn, seqLengths, rnn_module)
     end
 
-    rnn = nn.BatchNormalization(rnnHiddenSize)(rnn)
-    rnn = nn.Linear(rnnHiddenSize, 28)(rnn)
+    rnn = nn.BatchNormalization(2*rnnHiddenSize)(rnn)
+    rnn = nn.Linear(2*rnnHiddenSize, 28)(rnn)
     local model = nn.gModule({input, seqLengths}, {rnn})
     model = makeDataParallel(model, nGPU, isCUDNN)
     return model
