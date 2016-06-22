@@ -1,7 +1,7 @@
 require 'nngraph'
 require 'SeqDecorator'
 require 'SplitAdd'
-require 'BLSTM'
+BLSTM = require 'BLSTM'
 require 'UtilsMultiGPU'
 --require 'rnn'
 
@@ -53,7 +53,8 @@ local function deepSpeech(nGPU, isCUDNN)
     model:add(nn.View(rnnInputSize, -1):setNumInputDims(3)) -- batch x features x seqLength
     model:add(nn.Transpose({ 2, 3 }, { 1, 2 })) -- seqLength x batch x features
 
-    model:add(nn.BLSTM(rnnInputSize, rnnHiddenSize, isCUDNN))
+    --model:add(nn.BLSTM(rnnInputSize, rnnHiddenSize, isCUDNN))
+    model:add(BLSTM.createBLSTM(rnnInputSize, rnnHiddenSize, isCUDNN))
 
     for i = 1, nbOfHiddenLayers do
         model:add(nn.SeqDecorator(nn.BatchNormalization(2*rnnHiddenSize)))

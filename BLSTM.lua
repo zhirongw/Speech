@@ -64,3 +64,27 @@ function layer:__tostring__()
         return torch.type(self) .. ' @ ' .. torch.type(self.module)
     end
 end
+
+BLSTM = {}
+function BLSTM.createBLSTM(inputDim, hiddenDim, isCUDNN)
+    local forwardmodule
+    local backwardmodule
+    if isCUDNN then
+        forwardmodule = cudnn.LSTM(inputDim, hiddenDim, 1)
+        backwardmodule = cudnn.LSTM(inputDim, hiddenDim, 1)
+    else
+        forwardmodule = nn.SeqLSTM(inputDim, hiddenDim)
+        backwardmodule = nn.SeqLSTM(inputDim, hiddenDim)
+    end
+    local input = nn.Identity()()
+    local forward = forwardmodule(input)
+    local backward = nn.SeqReverseSequence(1)(input)
+    backward = backwardmodule(backward)
+    backward = nn.SeqReverseSequence(1)(backward)
+
+    local output = nn.JoinTable(3)({forward, backward})
+
+    return nn.gModule({input}, {output})
+end
+
+return BLSTM
