@@ -67,15 +67,15 @@ end
 
 BLSTM = {}
 function BLSTM.createBLSTM(inputDim, hiddenDim, isCUDNN)
+    
+    if isCUDNN then
+      return cudnn.BLSTM(inputDim, hiddenDim, 1)
+    end
+
     local forwardmodule
     local backwardmodule
-    if isCUDNN then
-        forwardmodule = cudnn.LSTM(inputDim, hiddenDim, 1)
-        backwardmodule = cudnn.LSTM(inputDim, hiddenDim, 1)
-    else
-        forwardmodule = nn.SeqLSTM(inputDim, hiddenDim)
-        backwardmodule = nn.SeqLSTM(inputDim, hiddenDim)
-    end
+    forwardmodule = nn.SeqLSTM(inputDim, hiddenDim)
+    backwardmodule = nn.SeqLSTM(inputDim, hiddenDim)
     local input = nn.Identity()()
     local forward = forwardmodule(input)
     local backward = nn.SeqReverseSequence(1)(input)
