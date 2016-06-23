@@ -4,7 +4,7 @@ require 'SplitAdd'
 require 'MaskRNN'
 require 'ReverseMaskRNN'
 require 'UtilsMultiGPU'
---require 'rnn'
+require 'LSTMDecorator'
 
 -- Chooses RNN based on if GRU or backend GPU support.
 local function getRNNModule(nIn, nHidden, GRU, is_cudnn)
@@ -27,11 +27,12 @@ local function getRNNModule(nIn, nHidden, GRU, is_cudnn)
 end
 
 -- Wraps rnn module into bi-directional.
-local function BRNN(feat, seqLengths, rnnModule)
-    local fwdLstm = nn.MaskRNN(rnnModule:clone())({ feat, seqLengths })
-    local bwdLstm = nn.ReverseMaskRNN(rnnModule:clone())({ feat, seqLengths })
+local function BRNN(feat, seqLengths, nIn, nHidden)
+--    local fwdLstm = nn.MaskRNN(rnnModule:clone())({ feat, seqLengths })
+--    local bwdLstm = nn.ReverseMaskRNN(rnnModule:clone())({ feat, seqLengths })
 --    return nn.CAddTable()({ fwdLstm, bwdLstm })
-    return nn.JoinTable(2)({ fwdLstm, bwdLstm })
+--    return nn.JoinTable(2)({ fwdLstm, bwdLstm })
+    return nn.LSTMDecorator(cudnn.BLSTM(nIn, nHidden, 1))({feat, seqLengths})
 end
 -- Creates the covnet+rnn structure.
 local function deepSpeech(nGPU, isCUDNN)
@@ -58,13 +59,13 @@ local function deepSpeech(nGPU, isCUDNN)
     cnn:add(nn.View(-1, rnnInputSize)) -- (seqLength x batch) x features
 
     local rnn = nn.Identity()({cnn(input)})
-    local rnn_module = getRNNModule(rnnInputSize, rnnHiddenSize, GRU, isCUDNN)
-    rnn = BRNN(rnn, seqLengths, rnn_module)
-    local rnn_module = getRNNModule(2*rnnHiddenSize, rnnHiddenSize, GRU, isCUDNN)
+--    local rnn_module = getRNNModule(rnnInputSize, rnnHiddenSize, GRU, isCUDNN)
+    rnn = BRNN(rnn, seqLengths, 800, 400)
+--    local rnn_module = getRNNModule(2*rnnHiddenSize, rnnHiddenSize, GRU, isCUDNN)
 
     for i = 1, nbOfHiddenLayers do
         rnn = nn.BatchNormalization(2*rnnHiddenSize)(rnn)
-        rnn = BRNN(rnn, seqLengths, rnn_module)
+        rnn = BRNN(rnn, seqLengths, 800, 400)
     end
 
     rnn = nn.BatchNormalization(2*rnnHiddenSize)(rnn)

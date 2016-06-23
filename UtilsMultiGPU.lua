@@ -20,6 +20,7 @@ function makeDataParallel(model, nGPU, is_cudnn)
                 require 'nngraph'
                 require 'MaskRNN'
                 require 'ReverseMaskRNN'
+		require 'LSTMDecorator'
                 if is_cudnn then
                     local cudnn = require 'cudnn'
                     cudnn.fastest = true
