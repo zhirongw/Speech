@@ -58,7 +58,7 @@ local function deepSpeech(nGPU, isCUDNN)
 
     for i = 1, nbOfHiddenLayers do
         model:add(nn.SeqDecorator(nn.BatchNormalization(2*rnnHiddenSize)))
-        model:add(nn.BLSTM(2*rnnHiddenSize, rnnHiddenSize, isCUDNN))
+        model:add(BLSTM.createBLSTM(2*rnnHiddenSize, rnnHiddenSize, isCUDNN))
     end
 
     model:add(nn.View(-1, 2*rnnHiddenSize)) -- (seqLength x batch) x features
