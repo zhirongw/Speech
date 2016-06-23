@@ -15,14 +15,10 @@ end
 function ReverseMaskRNN:reverse(input, seqLengths)
     local batchsize = input:size(2)
     assert(batchsize == seqLengths:size(1), ' number of sequence lengths does not match the number of samples in the batch for masking')
-    --local output = input.new():resizeAs(input):zero()
     local output = input.new():resizeAs(input)
-    for i = 1, batchsize do
-        --local T = seqLengths[i]
-        local T = input:size(1)
-        for t = 1, T do
-            output[T - t + 1][i]:copy(input[t][i])
-        end
+    local T = input:size(1)
+    for t = 1, T do
+        output[T-t+1]:copy(input[t])
     end
     return output
 end
