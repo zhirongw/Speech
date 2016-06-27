@@ -22,6 +22,11 @@ function WEREvaluator:__init(_path, mapper, testBatchSize, nbOfTestIterations, l
     self.suffix = '_' .. os.date('%Y%m%d_%H%M%S')
 end
 
+function WEREvaluator:predictCTC(src, nGPU)
+    local gpu_number = nGPU or 1
+    return src:view(-1, self.testBatchSize / gpu_number, src:size(2)):transpose(1,2)
+end
+
 function WEREvaluator:getWER(gpu, model, calSizeOfSequences, verbose, epoch)
     --[[
         load test_iter*batch_size data point from test set; compute average WER
@@ -74,11 +79,16 @@ function WEREvaluator:getWER(gpu, model, calSizeOfSequences, verbose, epoch)
 
         sizes_array = calSizeOfSequences(sizes_array)
         inputs:resize(inputsCPU:size()):copy(inputsCPU)
-        cutorch.synchronize()
-        local predictions = model:forward({inputs, sizes_array})
-        predictions = predictions:view(-1, self.testBatchSize, predictions:size(2)):transpose(1, 2)
-        cutorch.synchronize()
-
+        local predictions = model:forward(inputs)
+        if type(predictions) == 'table' then
+            local temp = self:predictCTC(predictions[1], #predictions)
+            for k = 2, #predictions do
+                temp = torch.cat(temp, self:predictCTC(predictions[k], #predictions), 1)
+            end
+            predictions = temp
+        else
+            predictions = self:predictCTC(predictions)
+        end        
         -- =============== for every data point in this batch ==================
         for j = 1, self.testBatchSize do
             local prediction_single = predictions[j]

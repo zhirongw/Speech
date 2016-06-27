@@ -80,16 +80,22 @@ function Network:trainNetwork(epochs, sgd_params)
     local lossHistory = {}
     local validationHistory = {}
     local ctcCriterion = nn.CTCCriterion()
-    local x, gradParameters = self.model:getParameters()
-    print('Number of model params: ' .. x:nElement())
+    local params, gradParameters = self.model:getParameters()
+    print('Number of model params: ' .. params:nElement())
 
     -- inputs (preallocate)
     local inputs = torch.Tensor()
     local sizes = torch.Tensor()
     if self.nGPU > 0 then
-        ctcCriterion = ctcCriterion:cuda()
         inputs = inputs:cuda()
         sizes = sizes:cuda()
+    end
+    local criterion
+    if self.nGPU <= 1 then
+        criterion = nn.CTCCriterion()
+        if self.nGPU == 1 then
+            criterion = criterion:cuda()
+        end
     end
 
     -- def loading buf and loader
@@ -110,11 +116,8 @@ function Network:trainNetwork(epochs, sgd_params)
     -- define the feval
     local function feval(x_new)
         --------------------- data load ------------------------
-        --cutorch.synchronize()
-        local timer =  torch.Timer()
-        local start = timer:time().real
         self.pool:synchronize() -- wait previous loading
-        local inputsCPU, sizes, targets = specBuf, sizesBuf, labelBuf -- move buf to training data
+        local inputsCPU, sizesCPU, targets = specBuf, sizesBuf, labelBuf -- move buf to training data
         inds = self.indexer:nxt_sorted_inds() -- load nxt batch
         self.pool:addjob(function()
             return loader:nxt_batch(inds, false)
@@ -125,54 +128,43 @@ function Network:trainNetwork(epochs, sgd_params)
                 sizesBuf = sizes
             end)
         --------------------- fwd and bwd ---------------------
+        sizesCPU = self.calSize(sizesCPU)
         inputs:resize(inputsCPU:size()):copy(inputsCPU) -- transfer over to GPU
-        sizes = self.calSize(sizes)
-        --cutorch.synchronize()
-        --print('data time:' .. timer:time().real - start)
-        --cutorch.synchronize()
-        start = timer:time().real
-        local predictions = self.model:forward({inputs, sizes})
-        --cutorch.synchronize()
-        --print('forward time:' .. timer:time().real - start)
-        --cutorch.synchronize()
-        start = timer:time().real
-        local loss = ctcCriterion:forward(predictions, targets, sizes)
-        --self.model:zeroGradParameters()
-        local gradOutput = ctcCriterion:backward(predictions, targets)
-        --cutorch.synchronize()
-        --print('loss time:' .. timer:time().real - start)
-        --cutorch.synchronize()
-        start = timer:time().real
-        local inputgrad = self.model:backward(inputs, gradOutput)
+        sizes:resize(sizesCPU:size()):copy(sizesCPU) -- transfer over to GPU
+
+        local loss
+        if criterion then
+            local predictions = self.model:forward(inputs)
+            loss = criterion:forward(predictions, targets, sizes)
+            local gradOutput = criterion:backward(predictions, targets)
+            self.model:zeroGradParameters()
+            self.model:backward(inputs, gradOutput)
+        else
+            self.model:forward(inputs)
+            self.model:zeroGradParameters()
+            loss = self.model:backward(inputs,targets,sizes)
+        end
         gradParameters:div(inputs:size(1))
-        gradParameters:clamp(-0.1, 0.1)
-        --cutorch.synchronize()
-        --print('backward time:' .. timer:time().real - start)
+        --gradParameters:clamp(-0.1, 0.1)
+
         return loss, gradParameters
     end
 
     -- training
-    local currentLoss
     local startTime = os.time()
-
+    local averageLoss = 0
     for i = 1, epochs do
-        local averageLoss = 0
-
         for j = 1, self.nbBatches do
-            currentLoss = 0
-         --   cutorch.synchronize()
-            local _, fs = optim.sgd(feval, x, sgd_params)
-         --   cutorch.synchronize()
-         --   if self.model.needsSync then
-         --       self.model:syncParameters()
-         --   end
-            currentLoss = currentLoss + fs[1]
+
+            local _, fs = optim.sgd(feval, params, sgd_params)
+
             xlua.progress(j, self.nbBatches)
-            averageLoss = averageLoss + currentLoss
+            averageLoss = 0.9 * averageLoss + 0.1 * fs[1]
             --print('iter: '.. (i-1)*self.nbBatches+j..' error: ' .. currentLoss)
+            assert(params:storage() == self.model:parameters()[1]:storage())
         end
 
-        averageLoss = averageLoss / self.nbBatches -- Calculate the average loss at this epoch.
+        --averageLoss = averageLoss / self.nbBatches -- Calculate the average loss at this epoch.
 
         -- Update validation error rates
         local wer = self:testNetwork(i)

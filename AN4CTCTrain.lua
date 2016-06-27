@@ -23,9 +23,9 @@ local networkParams = {
     modelTrainingPath = './models/',
     fileName = 'CTCNetwork.t7',
     dictionaryPath = './dictionary',
-    batchSize = 20,
+    batchSize = 160,
     validationBatchSize = 2,
-    validationIterations = 65,
+    validationIterations = 1,
     saveModelIterations = 50
 }
 --Parameters for the stochastic gradient descent (using the optim library).
