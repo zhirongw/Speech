@@ -1,5 +1,53 @@
+require 'nnx'
 ---- inherit DataParallel table
 local DPTCTC = torch.class('nn.DPTCTC','nn.DataParallelTable')
+
+local ThreadsImplCTC = torch.class('nn.DPTCTC.Threads', 'nn.DataParallelTable.Threads')
+
+function ThreadsImplCTC:__init(dpt, initFunc)
+    self.dpt = dpt
+    self.initFunc = initFunc
+    self.ctc = nn.CTCCriterion():cuda()
+end
+
+function ThreadsImplCTC:applyChanges()
+   if self.__threads then
+      local module = self.dpt.modules[1]
+      local ctc = self.ctc
+      for i, gpu in ipairs(self.dpt.gpuAssignments) do
+         self.__threads:addjob(i, function()
+            cutorch.setDevice(gpu)
+            if i == 1 then
+               _G.module = module
+               _G.ctc = ctc
+            else
+               _G.module = nil
+               _G.ctc = nil
+               collectgarbage()
+               _G.module = module:clone()
+               _G.ctc = ctc:clone()
+            end
+         end)
+      end
+      self.__threads:synchronize()
+   end
+end
+
+function ThreadsImplCTC:exec(closure)
+   self:setup()
+   local res = {}
+   for i=1,#self.dpt.gpuAssignments do
+      self.__threads:addjob(i,
+         function()
+            return closure(_G.module, i,  _G.ctc)
+         end,
+         function (_res_)
+            res[i] = _res_
+         end)
+   end
+   self.__threads:synchronize()
+   return res
+end
 
 local function hasFlattenedParmeters(self)
     if not self.flattenedParams then
@@ -20,6 +68,13 @@ local function pluck(tbl, idx)
         r[n] = val[idx]
     end
     return r
+end
+
+function DPTCTC:threads(initFunc)
+   require 'threads'
+   self.impl:close()
+   self.impl = nn.DPTCTC.Threads(self, initFunc)
+   return self
 end
 
 function DPTCTC:updateOutput(input)
@@ -82,15 +137,13 @@ function DPTCTC:__backward_inner(method, input, target, size, scale)
 
     local batch_size = inputGpu[1]:size(1)
     local loss = torch.Tensor(#self.gpuAssignments)
-    self.gradInputGpu = self.impl:exec(function(m, i)
+    self.gradInputGpu = self.impl:exec(function(m, i, ctc)
         if torch.isTensor(inputGpu[i]) and inputGpu[i]:numel() == 0 then
             return torch.CudaTensor()
         else
-            require 'nnx'
-            local ctcCriterion = nn.CTCCriterion():cuda()
             local targets_slice = slice(target, 1+(i-1)*batch_size, i*batch_size)
-            loss[i] = ctcCriterion:forward(outputGpu[i], targets_slice, sizeGpu[i])
-            local gradOutput = ctcCriterion:backward(outputGpu[i], targets_slice)
+            loss[i] = ctc:forward(outputGpu[i], targets_slice, sizeGpu[i])
+            local gradOutput = ctc:backward(outputGpu[i], targets_slice)
             return m[method](m, inputGpu[i], gradOutput, scale)
         end
     end)
@@ -116,3 +169,4 @@ function DPTCTC:__backward_inner(method, input, target, size, scale)
     cutorch.setDevice(prevGpuid)
     return loss:mean()
 end
+
